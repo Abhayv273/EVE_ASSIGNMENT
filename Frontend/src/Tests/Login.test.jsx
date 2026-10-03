@@ -1,146 +1,153 @@
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { BrowserRouter } from 'react-router-dom';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import axios from 'axios';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-import Login from '../Pages/Login.jsx';
-
+import Login from '../Pages/Login';
+// ---- Mocks ----
 vi.mock('axios');
-
 
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    useNavigate: () => mockNavigate,
-  };
+  return { ...actual, useNavigate: () => mockNavigate };
 });
 
-describe('Login Component', () => {
+// ---- Helpers ----
+const renderLogin = () =>
+  render(
+    <MemoryRouter>
+      <Login />
+    </MemoryRouter>
+  );
+
+
+const getEmailInput = () => document.querySelector('input[type="email"]');
+const getPasswordInput = () => document.querySelector('input[type="password"]');
+
+const fillAndSubmit = async (user, email = 'test@example.com', password = 'secret123') => {
+  await user.type(getEmailInput(), email);
+  await user.type(getPasswordInput(), password);
+  await user.click(screen.getByRole('button', { name: /sign in/i }));
+};
+
+describe('Login component', () => {
   beforeEach(() => {
-   
     vi.clearAllMocks();
     sessionStorage.clear();
   });
 
-  it('Should render the Login form elements properly', () => {
-    render(
-      <BrowserRouter>
-        <Login />
-      </BrowserRouter>
-    );
+  it('renders heading, fields, submit button and signup link', () => {
+    renderLogin();
 
-    // Form elements check kar rahe hain
-    expect(screen.getByRole('heading', { name: /Sign In/i })).toBeInTheDocument();
-    expect(screen.getByLabelText(/Email/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Password/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Sign In/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /sign in/i })).toBeInTheDocument();
+    expect(getEmailInput()).toBeInTheDocument();
+    expect(getPasswordInput()).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /sign in/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /signup now/i })).toHaveAttribute('href', '/signup');
   });
 
-  it('Should update state when typing in input fields', () => {
-    render(
-      <BrowserRouter>
-        <Login />
-      </BrowserRouter>
-    );
-
-    const emailInput = screen.getByLabelText(/Email/i);
-    const passwordInput = screen.getByLabelText(/Password/i);
-
-    // Typing simulate kar rahe hain
-    fireEvent.change(emailInput, { target: { value: 'abhay@example.com' } });
-    fireEvent.change(passwordInput, { target: { value: 'securepass123' } });
-
-    expect(emailInput.value).toBe('abhay@example.com');
-    expect(passwordInput.value).toBe('securepass123');
+  it('does not show an error initially', () => {
+    renderLogin();
+    expect(document.querySelector('.auth-error')).not.toBeInTheDocument();
   });
 
-  it('Should handle successful Patient login and navigate to dashboard', async () => {
-    // Fake successful response setup
-    const mockResponse = {
-      data: {
-        success: true,
-        data: {
-          token: 'fake_jwt_token',
-          user: { role: 'PATIENT', name: 'Abhay Verma' }
-        }
-      }
-    };
-    axios.post.mockResolvedValueOnce(mockResponse);
+  it('updates input values as the user types', async () => {
+    const user = userEvent.setup();
+    renderLogin();
 
-    render(
-      <BrowserRouter>
-        <Login />
-      </BrowserRouter>
-    );
+    await user.type(getEmailInput(), 'abc@test.com');
+    await user.type(getPasswordInput(), 'mypassword');
 
-    // Form fill aur submit
-    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'patient@test.com' } });
-    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'password123' } });
-    fireEvent.click(screen.getByRole('button', { name: /Sign In/i }));
+    expect(getEmailInput()).toHaveValue('abc@test.com');
+    expect(getPasswordInput()).toHaveValue('mypassword');
+  });
 
-    // Wait for async actions
-    await waitFor(() => {
-      // Check API Call
-      expect(axios.post).toHaveBeenCalledTimes(1);
-      
-      // Check Session Storage
-      expect(sessionStorage.getItem('auth_token')).toBe('fake_jwt_token');
-      
-      // Check Navigation
-      expect(mockNavigate).toHaveBeenCalledWith('/patient/dashboard');
+  it('marks email and password as required', () => {
+    renderLogin();
+    expect(getEmailInput()).toBeRequired();
+    expect(getPasswordInput()).toBeRequired();
+  });
+
+  it('posts credentials to the login endpoint', async () => {
+    const user = userEvent.setup();
+    axios.post.mockResolvedValue({
+      data: { success: true, data: { token: 't', user: { role: 'PATIENT' } } },
     });
+    renderLogin();
+
+    await fillAndSubmit(user, 'test@example.com', 'secret123');
+
+    await waitFor(() => expect(axios.post).toHaveBeenCalledTimes(1));
+    expect(axios.post).toHaveBeenCalledWith(
+      expect.stringContaining('/api/auth/login'),
+      { email: 'test@example.com', password: 'secret123' }
+    );
   });
 
-  it('Should handle successful Admin login and navigate to admin dashboard', async () => {
-    // Fake Admin response setup
-    const mockResponse = {
-      data: {
-        success: true,
-        data: {
-          token: 'admin_jwt_token',
-          user: { role: 'ADMIN', name: 'Admin User' }
-        }
-      }
-    };
-    axios.post.mockResolvedValueOnce(mockResponse);
-
-    render(
-      <BrowserRouter>
-        <Login />
-      </BrowserRouter>
-    );
-
-    fireEvent.change(screen.getByLabelText(/Email/i), { target: { value: 'admin@test.com' } });
-    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'adminpass' } });
-    fireEvent.click(screen.getByRole('button', { name: /Sign In/i }));
-
-    await waitFor(() => {
-      expect(mockNavigate).toHaveBeenCalledWith('/admin/dashboard');
+  it('stores token + user and redirects PATIENT to patient dashboard', async () => {
+    const user = userEvent.setup();
+    const fakeUser = { id: 1, name: 'Abhay', role: 'PATIENT' };
+    axios.post.mockResolvedValue({
+      data: { success: true, data: { token: 'jwt-token-123', user: fakeUser } },
     });
+    renderLogin();
+
+    await fillAndSubmit(user);
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/patient/dashboard'));
+    expect(sessionStorage.getItem('auth_token')).toBe('jwt-token-123');
+    expect(JSON.parse(sessionStorage.getItem('auth_user'))).toEqual(fakeUser);
   });
 
-  it('Should display an error message on login failure', async () => {
-    // Fake error response setup
-    const mockError = {
-      response: {
-        data: { message: 'Invalid email or password' }
-      }
-    };
-    axios.post.mockRejectedValueOnce(mockError);
-
-    render(
-      <BrowserRouter>
-        <Login />
-      </BrowserRouter>
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: /Sign In/i }));
-
-    await waitFor(() => {
-      
-      expect(screen.getByText('Invalid email or password')).toBeInTheDocument();
+  it('redirects ADMIN to admin dashboard', async () => {
+    const user = userEvent.setup();
+    axios.post.mockResolvedValue({
+      data: { success: true, data: { token: 'admin-token', user: { id: 2, role: 'ADMIN' } } },
     });
+    renderLogin();
+
+    await fillAndSubmit(user, 'admin@example.com', 'adminpass');
+
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/admin/dashboard'));
+    expect(mockNavigate).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows the server error message on failed login', async () => {
+    const user = userEvent.setup();
+    axios.post.mockRejectedValue({
+      response: { data: { message: 'Invalid credentials' } },
+    });
+    renderLogin();
+
+    await fillAndSubmit(user);
+
+    expect(await screen.findByText('Invalid credentials')).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('auth_token')).toBeNull();
+  });
+
+  it('shows a fallback error when there is no server response (network error)', async () => {
+    const user = userEvent.setup();
+    axios.post.mockRejectedValue(new Error('Network Error'));
+    renderLogin();
+
+    await fillAndSubmit(user);
+
+    expect(await screen.findByText('Login failed. Try again.')).toBeInTheDocument();
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when the API responds with success: false', async () => {
+    const user = userEvent.setup();
+    axios.post.mockResolvedValue({ data: { success: false } });
+    renderLogin();
+
+    await fillAndSubmit(user);
+
+    await waitFor(() => expect(axios.post).toHaveBeenCalled());
+    expect(mockNavigate).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('auth_token')).toBeNull();
   });
 });
